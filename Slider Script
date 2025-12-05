@@ -1,0 +1,120 @@
+using UnityEngine;
+using FMODUnity;
+using FMOD.Studio;
+using UnityEngine.InputSystem; // Keep this for New Input System
+
+public class NewInputDrumPad : MonoBehaviour
+{
+    [Header("Limit Settings")]
+    [Tooltip("The lowest point the slider can go")]
+    public float minY = -2.0f;
+    [Tooltip("The highest point the slider can go")]
+    public float maxY = 2.0f;
+
+    [Header("FMOD Settings")]
+    public EventReference musicEvent; 
+    public string transitionParameter = "Music_Transition";
+
+    private EventInstance audioInstance;
+    private Collider2D myCollider;
+    private Camera mainCamera;
+    
+    // State variables
+    private bool isDragging = false;
+    private Vector3 offset;
+
+    void Start()
+    {
+        myCollider = GetComponent<Collider2D>();
+        mainCamera = Camera.main;
+        
+        // Initialize Audio
+        audioInstance = RuntimeManager.CreateInstance(musicEvent);
+        audioInstance.start();
+        
+        // Set initial parameter based on current position
+        UpdateFmodAndPosition(transform.position.y);
+    }
+
+    void Update()
+    {
+        if (Mouse.current == null) return;
+
+        // 1. Convert Mouse to World Point
+        Vector2 mouseScreenPos = Mouse.current.position.ReadValue();
+        Vector3 mouseWorldPos = mainCamera.ScreenToWorldPoint(mouseScreenPos);
+        
+        // 2. DETECT CLICK (Start Dragging)
+        if (Mouse.current.leftButton.wasPressedThisFrame)
+        {
+            // Check if mouse is touching THIS collider
+            if (myCollider == Physics2D.OverlapPoint(mouseWorldPos))
+            {
+                isDragging = true;
+                // Calculate the difference between mouse and button center
+                // This prevents the button from "snapping" to the mouse cursor instantly
+                offset = transform.position - mouseWorldPos;
+            }
+        }
+
+        // 3. DETECT RELEASE (Stop Dragging)
+        if (Mouse.current.leftButton.wasReleasedThisFrame)
+        {
+            isDragging = false;
+        }
+
+        // 4. MOVE SLIDER
+        if (isDragging)
+        {
+            // Apply the offset to keep movement smooth
+            float targetY = mouseWorldPos.y + offset.y;
+            
+            // This method handles the Clamping and FMOD update
+            UpdateFmodAndPosition(targetY);
+        }
+    }
+
+    // Helper function to keep everything synced
+    void UpdateFmodAndPosition(float targetY)
+    {
+        // A. CLAMP: Force the Y value to stay strictly between Min and Max
+        float clampedY = Mathf.Clamp(targetY, minY, maxY);
+
+        // B. MOVE: Update visual position
+        transform.position = new Vector3(transform.position.x, clampedY, transform.position.z);
+
+        // C. AUDIO: Calculate percentage (0.0 to 1.0) and send to FMOD
+        if (audioInstance.isValid())
+        {
+            float sliderValue = Mathf.InverseLerp(minY, maxY, clampedY);
+            audioInstance.setParameterByName(transitionParameter, sliderValue);
+        }
+    }
+
+    // --- VISUAL HELPER ---
+    // This draws lines in the Scene view so you can see the limits!
+    private void OnDrawGizmosSelected()
+    {
+        Gizmos.color = Color.yellow;
+        
+        // Draw Top Line
+        Vector3 topPos = new Vector3(transform.position.x, maxY, transform.position.z);
+        Gizmos.DrawLine(topPos + Vector3.left, topPos + Vector3.right);
+        
+        // Draw Bottom Line
+        Vector3 botPos = new Vector3(transform.position.x, minY, transform.position.z);
+        Gizmos.DrawLine(botPos + Vector3.left, botPos + Vector3.right);
+        
+        // Draw Connection
+        Gizmos.DrawLine(topPos, botPos);
+    }
+
+    private void OnDestroy()
+    {
+        if (audioInstance.isValid())
+        {
+            audioInstance.stop(FMOD.Studio.STOP_MODE.ALLOWFADEOUT);
+            audioInstance.release();
+        }
+    }
+}
